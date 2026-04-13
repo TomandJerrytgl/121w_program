@@ -1,0 +1,9 @@
+import re
+
+def get_number_after_word(text, word):
+    pattern = rf"{re.escape(word)}.*?([-+]?\d*\.?\d+)"
+    match = re.search(pattern, text)
+    if match:
+        num = match.group(1)
+        return float(num) if "." in num else int(num)
+    return None
