@@ -1,4 +1,7 @@
 from functions.lab1_step1 import extract_masses
+from functions.significance import scan_significance
+import numpy as np
+import matplotlib.pyplot as plt
 import os
 
 DATA_PATH = "data/input/p121_lab1_data/"
@@ -12,31 +15,97 @@ samples = {
     1000: ("zp_mzp1000_electrons.txt", "ee_mll900_electrons.txt"),
 }
 
-# 👇 修改这里切换数据
-mzp = 750
+weights = {
+    200: {"signal": 3.0, "background": 2.0},
+    300: {"signal": 2.0, "background": 2.0},
+    400: {"signal": 1.5, "background": 2.0},
+    500: {"signal": 1.0, "background": 2.0},
+    750: {"signal": 0.75, "background": 2.0},
+    1000: {"signal": 0.50, "background": 2.0},
+}
 
-signal_file, background_file = samples[mzp]
+fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+axes = axes.flatten()
 
-signal_path = os.path.join(DATA_PATH, signal_file)
-background_path = os.path.join(DATA_PATH, background_file)
+for i, mzp in enumerate(samples):
 
-print(f"\n=== Running analysis for {mzp} GeV ===")
-print(f"Signal file: {signal_path}")
-print(f"Background file: {background_path}")
+    signal_file, background_file = samples[mzp]
 
-# 读取数据
-signal_masses, total_s, selected_s = extract_masses(signal_path)
-background_masses, total_b, selected_b = extract_masses(background_path)
+    signal_path = os.path.join(DATA_PATH, signal_file)
+    background_path = os.path.join(DATA_PATH, background_file)
 
-# 输出信息
-print(f"\nSignal:")
-print(f"  Total events: {total_s}")
-print(f"  Selected events: {selected_s}")
+    print(f"\n=== Running {mzp} GeV ===")
 
-print(f"\nBackground:")
-print(f"  Total events: {total_b}")
-print(f"  Selected events: {selected_b}")
+    signal_masses, _, _ = extract_masses(signal_path)
+    background_masses, _, _ = extract_masses(background_path)
 
-print("\nFirst 10 signal masses:")
-for m in signal_masses[:10]:
-    print(f"{m:.3f} GeV")
+    signal_weight = weights[mzp]["signal"]
+    background_weight = weights[mzp]["background"]
+
+    # ---------- 自动范围（修正版） ----------
+    all_masses = signal_masses + background_masses
+    rough_edges = np.linspace(min(all_masses), max(all_masses), 100)
+    centers = 0.5 * (rough_edges[:-1] + rough_edges[1:])
+
+    # 用 signal 找峰
+    s_counts, _ = np.histogram(
+        signal_masses,
+        bins=rough_edges,
+        weights=np.full(len(signal_masses), signal_weight)
+    )
+
+    peak = centers[np.argmax(s_counts)]
+
+    half_width = max(50, 0.1 * mzp)
+    mass_range = (peak - half_width, peak + half_width)
+
+    # ---------- 精细 histogram ----------
+    bins = 30
+    edges = np.linspace(mass_range[0], mass_range[1], bins + 1)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    width = edges[1] - edges[0]
+
+    b_counts, _ = np.histogram(
+        background_masses,
+        bins=edges,
+        weights=np.full(len(background_masses), background_weight)
+    )
+
+    s_counts, _ = np.histogram(
+        signal_masses,
+        bins=edges,
+        weights=np.full(len(signal_masses), signal_weight)
+    )
+
+    sb_counts = b_counts + s_counts
+
+    ax = axes[i]
+
+    # ---------- 画图 ----------
+    ax.bar(centers, sb_counts, width=width, color="forestgreen", alpha=0.8)
+    ax.bar(centers, b_counts, width=width, color="tomato", alpha=0.9)
+
+    ax.set_title(f"{mzp} GeV")
+    ax.set_xlim(mass_range)
+
+    ymax = max(sb_counts) * 1.1
+    ax.set_ylim(0, ymax)
+
+    ax.set_xlabel("Mass [GeV]")
+    ax.set_ylabel("Entries / bin")
+
+    ax.tick_params(labelsize=9)
+
+    # ---------- significance ----------
+    _, _, _, sigs, best_delta, best_sig = scan_significance(
+        signal_masses,
+        background_masses,
+        mzp,
+        signal_weight,
+        background_weight
+    )
+
+    print(f"Best delta = {best_delta}, Significance = {best_sig:.3f}")
+
+plt.tight_layout()
+plt.show()
